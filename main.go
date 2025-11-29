@@ -2,17 +2,27 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	//"github.com/openai/openai-go/v3/responses"
 )
+
+type Publication struct {
+	Title  string  `json:"title"`
+	Number uint8   `json:"number"`
+	Month  []uint8 `json:"months"`
+	Year   uint16  `json:"year"`
+}
 
 func main() {
 	ctx := context.Background()
@@ -29,207 +39,190 @@ func main() {
 		os.Exit(10001)
 	}
 
-	// 1. Read all the file names in the directory
-	fmt.Printf("Reading the name of the files from the working directory... ")
+	//	----------------------------------------------------------------------------------------------------------------
+	// 	0. Read all the folders from the working directory
+	//	----------------------------------------------------------------------------------------------------------------
 
-	files, err := os.ReadDir(workingDir)
+	fmt.Printf("Reading the folders from the working directory %s... ", workingDir)
+
+	folders, err := os.ReadDir(workingDir)
+
 	if err != nil {
 		fmt.Printf(" [ FAILED ]\n")
 		fmt.Printf("\n")
-		fmt.Printf("\tUnable to read all the files from the working directory: %s\n", err)
+		fmt.Printf("\tUnable to read all the folder from the working directory: %s\n", err)
 		os.Exit(10002)
 	}
 
-	fmt.Printf("\rFound %d files from the working directory [ OK ]\t\t\n", len(files))
+	fmt.Println("[ OK ]")
 
-	// 2. Ask the LLM to infer file order from file names
-	fmt.Printf("Requesting the assistant to guess the order of the files... ")
+	for _, folder := range folders {
 
-	var assistantPrompt strings.Builder
-	assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [\"page_01.pdf\", \"page_02.pdf\"]). Return only valid JSON and no extra text.\n")
+		if !folder.IsDir() {
+			continue
+		}
 
-	for _, file := range files {
-		assistantPrompt.WriteString(file.Name())
-		assistantPrompt.WriteString("\n")
-	}
+		publicationFolder := filepath.Join(workingDir, folder.Name())
 
-	client := openai.NewClient(
-		option.WithAPIKey(openAiApiKey),
-	)
+		//	----------------------------------------------------------------------------------------------------------------
+		// 	1. Read all the file names in the directory
+		//	----------------------------------------------------------------------------------------------------------------
+		fmt.Printf("Reading the name of the files from the directory %s... ", publicationFolder)
 
-	chatResp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: openai.ChatModelGPT5Mini,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage(assistantPrompt.String()),
-		},
-	})
+		files, err := os.ReadDir(publicationFolder)
 
-	if err != nil {
-		fmt.Printf("[ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tError while ordering files: %v\n", err)
-		os.Exit(10003)
-	}
+		if err != nil {
+			fmt.Printf(" [ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tUnable to read all the files from the directory: %s\n", err)
+			os.Exit(10002)
+		}
 
-	if len(chatResp.Choices) == 0 || chatResp.Choices[0].Message.Content == "" {
-		fmt.Printf("[ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tAssistant returned an empty response when ordering files\n")
-		os.Exit(10004)
-	}
+		fmt.Println("[ OK ]")
 
-	var orderedFiles []string
-	if err := json.Unmarshal([]byte(chatResp.Choices[0].Message.Content), &orderedFiles); err != nil {
-		fmt.Printf("[ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tUnable to parse assistant JSON response: %v\n", err)
-		os.Exit(10005)
-	}
+		fmt.Printf("\r\tFound %d files from the directory\t\t\n", len(files))
 
-	if len(orderedFiles) == 0 {
-		fmt.Printf("[ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tThe assistant did not return any ordered files\n")
-		os.Exit(10006)
-	}
+		//	----------------------------------------------------------------------------------------------------------------
+		// 	2. Ask the LLM to infer file order from file names
+		//	----------------------------------------------------------------------------------------------------------------
+		fmt.Printf("Requesting the assistant to guess the order of the files... ")
 
-	fmt.Printf("[ OK ]\n")
+		var assistantPrompt strings.Builder
+		assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [\"page_01.pdf\", \"page_02.pdf\"]). Return only valid JSON and no extra text.\n")
 
-	// 3. Extract the publication month & year of the first page, assuming it is the cover
-	coverFileName := orderedFiles[0]
+		for _, file := range files {
+			assistantPrompt.WriteString(file.Name())
+			assistantPrompt.WriteString("\n")
+		}
 
-	fmt.Printf("Analyzing cover file '%s'... ", coverFileName)
+		client := openai.NewClient(
+			option.WithAPIKey(openAiApiKey),
+		)
 
-	coverPath := filepath.Join(workingDir, coverFileName)
-
-	if _, err := os.Stat(coverPath); err != nil {
-		fmt.Printf("[ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tCover file '%s' does not exist or is not accessible: %v\n", coverPath, err)
-		os.Exit(10007)
-	}
-
-	reader, err := os.Open(coverPath)
-
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tCover file '%s' does not exist or is not accessible: %v\n", coverPath, err)
-		os.Exit(10007)
-	}
-
-	//defer reader.Close()
-
-	file, err := client.Files.New(context.TODO(), openai.FileNewParams{
-		File:    reader,
-		Purpose: openai.FilePurposeUserData,
-	})
-
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tUnable to create a new file: %v\n", err)
-		os.Exit(10008)
-	}
-
-	storeName := "go-runner-vector-store"
-
-	vectorStore, err := client.VectorStores.New(
-		ctx,
-		openai.VectorStoreNewParams{
-			ExpiresAfter: openai.VectorStoreNewParamsExpiresAfter{
-				Days: 1,
+		chatResp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+			Model: openai.ChatModelGPT5Mini,
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage(assistantPrompt.String()),
 			},
-			Name: openai.String(storeName),
-		},
-	)
+		})
 
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
+		if err != nil {
+			fmt.Printf("[ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tError while ordering files: %v\n", err)
+			os.Exit(10003)
+		}
+
+		if len(chatResp.Choices) == 0 || chatResp.Choices[0].Message.Content == "" {
+			fmt.Printf("[ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tAssistant returned an empty response when ordering files\n")
+			os.Exit(10004)
+		}
+
+		var orderedFiles []string
+		if err := json.Unmarshal([]byte(chatResp.Choices[0].Message.Content), &orderedFiles); err != nil {
+			fmt.Printf("[ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tUnable to parse assistant JSON response: %v\n", err)
+			os.Exit(10005)
+		}
+
+		if len(orderedFiles) == 0 {
+			fmt.Printf("[ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tThe assistant did not return any ordered files\n")
+			os.Exit(10006)
+		}
+
+		fmt.Printf("[ OK ]\n")
+
+		//	----------------------------------------------------------------------------------------------------------------
+		// 	3. Extract the publication month(s) & year of the first page, assuming it is the cover
+		//	----------------------------------------------------------------------------------------------------------------
+		coverFileName := orderedFiles[0]
+
+		fmt.Printf("Analyzing cover file '%s'... ", coverFileName)
+
+		coverPath := filepath.Join(publicationFolder, coverFileName)
+
+		if _, err := os.Stat(coverPath); err != nil {
+			fmt.Printf("[ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tCover file '%s' does not exist or is not accessible: %v\n", coverPath, err)
+			os.Exit(10007)
+		}
+
+		reader, err := os.Open(coverPath)
+
+		if err != nil {
+			fmt.Printf(" [ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("\tCover file '%s' does not exist or is not accessible: %v\n", coverPath, err)
+			os.Exit(10007)
+		}
+
+		defer reader.Close()
+
+		assistantPrompt.Reset()
+		assistantPrompt.WriteString("You are given a JPG file containing an image of a cover page of a French publication: ")
+		assistantPrompt.WriteString(coverFileName)
+		assistantPrompt.WriteString(". Based on typical naming conventions and any context you can infer, ")
+		assistantPrompt.WriteString("return only the title, publication number and publication month and year in the JSON format `{ \"title\": string, \"months\": [number,], \"year\": number, \"number\": number }`")
+		assistantPrompt.WriteString("If you cannot determine it, answer exactly `Unknown`. Do not add any extra explanation.")
+
+		fileContent, _ := io.ReadAll(reader)
+		base64FileContent := base64.StdEncoding.EncodeToString(fileContent)
+
+		publicationDateResponse, err := client.Responses.New(ctx, responses.ResponseNewParams{
+			Input: responses.ResponseNewParamsInputUnion{
+				OfInputItemList: []responses.ResponseInputItemUnionParam{
+					{
+						OfInputMessage: &responses.ResponseInputItemMessageParam{
+							Role: "user",
+							Content: responses.ResponseInputMessageContentListParam{
+								{
+									OfInputText: &responses.ResponseInputTextParam{
+										Text: assistantPrompt.String(),
+									},
+								},
+								{
+									OfInputImage: &responses.ResponseInputImageParam{
+										Type:     "input_image",
+										ImageURL: param.NewOpt("data:image/jpeg;base64," + base64FileContent),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Model: openai.ChatModelGPT5Mini,
+		})
+
+		if err != nil {
+			fmt.Printf(" [ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("Unable to analyze the cover: %v\n", err)
+			os.Exit(10008)
+		}
+
+		if publicationDateResponse == nil || publicationDateResponse.OutputText() == "" {
+			fmt.Printf(" [ FAILED ]\n")
+			fmt.Printf("\n")
+			fmt.Printf("Model did not return a publication date\n")
+			os.Exit(10009)
+		}
+
+		fmt.Printf(" [ OK ]\n")
 		fmt.Printf("\n")
-		fmt.Printf("\tUnable to create a vector store: %v\n", err)
-		os.Exit(10008)
+
+		var publication Publication
+		if err := json.Unmarshal([]byte(publicationDateResponse.OutputText()), &publication); err != nil {
+			fmt.Println("decode error:", err)
+			return
+		}
+
+		fmt.Printf("Publication %s #%d\n", publication.Title, publication.Number)
 	}
-
-	batch, err := client.VectorStores.FileBatches.New(
-		ctx,
-		vectorStore.ID,
-		openai.VectorStoreFileBatchNewParams{
-			FileIDs: []string{file.ID},
-		},
-	)
-
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tUnable to upload the file to the vector store: %v\n", err)
-		os.Exit(10009)
-	}
-
-	//	Watchout: the version I use has a bug where the batch ID and vector store ID are swapped
-	polledBatch, err := client.VectorStores.FileBatches.PollStatus(
-		ctx,
-		batch.ID,
-		vectorStore.ID,
-		0,
-	)
-
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tUnable to upload the file to the vector store: %v\n", err)
-		os.Exit(10009)
-	}
-
-	if polledBatch.Status != "completed" {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("\tUnable to upload the file to the vector store: status is %v\n", polledBatch.Status)
-		os.Exit(10009)
-	}
-
-	assistantPrompt.Reset()
-	assistantPrompt.WriteString("You are given a JPG file containing an image of a cover page of a French publication: ")
-	assistantPrompt.WriteString(coverFileName)
-	assistantPrompt.WriteString(". Based on typical naming conventions and any context you can infer, ")
-	assistantPrompt.WriteString("return only the publication month and year in the format `MMMM YYYY` (for example: `Juin 2024`). ")
-	assistantPrompt.WriteString("If you cannot determine it, answer exactly `Unknown`. Do not add any extra explanation.")
-
-	fileSearchToolParam := responses.FileSearchToolParam{
-		VectorStoreIDs: []string{vectorStore.ID},
-	}
-
-	toolParam := responses.ToolUnionParam{
-		OfFileSearch: &fileSearchToolParam,
-	}
-
-	publicationDateResponse, err := client.Responses.New(ctx, responses.ResponseNewParams{
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(assistantPrompt.String()),
-		},
-		Model: openai.ChatModelGPT5,
-		Tools: []responses.ToolUnionParam{
-			toolParam,
-		},
-	})
-
-	if err != nil {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("Unable to analyze the cover: %v\n", err)
-		os.Exit(10008)
-	}
-
-	if publicationDateResponse == nil || publicationDateResponse.OutputText() == "" {
-		fmt.Printf(" [ FAILED ]\n")
-		fmt.Printf("\n")
-		fmt.Printf("Model did not return a publication date\n")
-		os.Exit(10009)
-	}
-
-	fmt.Printf(" [ OK ]\n")
-	fmt.Printf("\n")
-
-	publicationDate := strings.TrimSpace(publicationDateResponse.OutputText())
-	fmt.Printf("Publication date (month & year): %s\n", publicationDate)
 }

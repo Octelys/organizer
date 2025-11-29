@@ -22,7 +22,7 @@ The program is configured entirely via environment variables:
 - `OPENAI_API_KEY` (required): Your OpenAI API key.
 - `WORKING_DIR` (required): Absolute or relative path to the directory whose files you want to analyze.
 
-In GoLand, you can set these in **Run | Edit Configurations...** under **Environment variables**.
+In GoLand, you can set these in **Run | Edit Configurations...** under **Environment variables**.
 
 ## Installation
 
@@ -58,9 +58,10 @@ The core logic is in `main.go`:
 1. Read `OPENAI_API_KEY` and `WORKING_DIR` from the environment.
 2. Use `os.ReadDir` to list all files in `WORKING_DIR` and print them.
 3. Build a natural-language prompt enumerating those filenames.
-4. Call the OpenAI Chat Completions API via the official Go SDK (`github.com/openai/openai-go/v3`) with that prompt.
-5. Expect the model to respond with a JSON array (e.g. `["page_01.png", "page_02.png", ...]`).
+4. Call the OpenAI Chat Completions and Responses APIs via the official Go SDK (`github.com/openai/openai-go/v3`).
+5. Expect the model to respond with a JSON array (e.g. `["page_01.png", "page_02.png", ...]`) describing the correct order.
 6. Use `encoding/json` to unmarshal the JSON string into a `[]string` slice (`orderedFiles`).
+7. (Optional extension) Upload the cover image and call the Responses API with the image attached to infer a publication month/year.
 
 You can then extend the program to:
 
