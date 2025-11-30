@@ -108,7 +108,7 @@ func main() {
 		fmt.Printf("Requesting the assistant to guess the order of the files... ")
 
 		var assistantPrompt strings.Builder
-		assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [{\"file\": \"page_01.pdf\", \"number\": 1 }, {\"file\": \"page_02.pdf\", \"number\": 2 }]). If the 1st file starts at the number 0, make sure you start counting at 1. Return only valid JSON and no extra text.\n")
+		assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [{\"file\": \"page_01.pdf\", \"number\": 1 }, {\"file\": \"page_02.pdf\", \"number\": 2 }]). If the 1st file starts at the number 0, make sure you start counting at 1. Return only valid JSON and no extra text. Exclude the duplicate file names, especially those who have an extra ' 1', and exclude the files that does not seem to be entirely different from the rest.\n")
 
 		for _, file := range files {
 			assistantPrompt.WriteString(file.Name())
@@ -223,24 +223,27 @@ func main() {
 		if err != nil {
 			fmt.Printf(" [ FAILED ]\n")
 			fmt.Printf("\n")
-			fmt.Printf("Unable to analyze the cover: %v\n", err)
-			os.Exit(10008)
+			fmt.Printf("\tUnable to analyze the cover: %v\n", err)
+			continue
 		}
 
-		if publicationDateResponse == nil || publicationDateResponse.OutputText() == "" {
+		outputText := publicationDateResponse.OutputText()
+
+		if publicationDateResponse == nil || outputText == "" || outputText == "Unknown" {
 			fmt.Printf(" [ FAILED ]\n")
 			fmt.Printf("\n")
-			fmt.Printf("Model did not return a publication date\n")
-			os.Exit(10009)
+			fmt.Printf("\tModel did not return a publication date\n")
+			continue
 		}
 
 		fmt.Printf(" [ OK ]\n")
 		fmt.Printf("\n")
 
 		var publication Publication
-		if err := json.Unmarshal([]byte(publicationDateResponse.OutputText()), &publication); err != nil {
+		if err := json.Unmarshal([]byte(outputText), &publication); err != nil {
 			fmt.Println("decode error:", err)
-			return
+			fmt.Println("output:", outputText)
+			os.Exit(10010)
 		}
 
 		fmt.Printf("Publication %s #%d\n", publication.Title, publication.Number)
