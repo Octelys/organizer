@@ -17,9 +17,10 @@ import (
 )
 
 type AiProxy struct {
-	model   shared.ResponsesModel
-	client  *openai.Client
-	context context.Context
+	textModel          shared.ResponsesModel
+	imageAnalysisModel shared.ResponsesModel
+	client             *openai.Client
+	context            context.Context
 }
 
 func New(
@@ -31,9 +32,10 @@ func New(
 	)
 
 	return &AiProxy{
-		client:  &openaiClient,
-		context: context,
-		model:   openai.ChatModelGPT5Nano,
+		client:             &openaiClient,
+		context:            context,
+		textModel:          openai.ChatModelGPT5Nano,
+		imageAnalysisModel: openai.ChatModelGPT5Mini,
 	}, nil
 }
 
@@ -56,7 +58,7 @@ func (aiProxy *AiProxy) SendRequest(assistantPrompt string) (string, error) {
 				},
 			},
 		},
-		Model: aiProxy.model,
+		Model: aiProxy.textModel,
 	})
 
 	if err != nil {
@@ -102,7 +104,7 @@ func (aiProxy *AiProxy) SendRequestWithImage(assistantPrompt string, reader io.R
 				},
 			},
 		},
-		Model: aiProxy.model,
+		Model: aiProxy.imageAnalysisModel,
 	})
 
 	if err != nil {
