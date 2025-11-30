@@ -1,2 +1,9 @@
 /**/.idea/
 /**/go.sum
+
+# Compiled binaries
+/bin/
+
+# Audit logs
+audit-*.log
+

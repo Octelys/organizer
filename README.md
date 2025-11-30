@@ -38,19 +38,59 @@ go mod tidy
 
 ## Running the program
 
-From the command line:
+### Using Make (recommended)
+
+The project includes a Makefile for common tasks:
+
+```bash
+# Build the application
+make build
+
+# Run from source
+export OPENAI_API_KEY="your-api-key-here"
+export WORKING_DIR="/path/to/your/magazine/scans"
+export OUTPUT_DIR="/path/to/output/directory"
+make run
+
+# Clean build artifacts
+make clean
+
+# Run tests, linters, and build
+make all
+
+# Show all available commands
+make help
+```
+
+### Building the application manually
+
+```bash
+go build -o bin/organizer ./cmd/organizer
+```
+
+### Running from source
 
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
 export WORKING_DIR="/path/to/your/magazine/scans"
 export OUTPUT_DIR="/path/to/output/directory"
 
-go run ./...
+go run ./cmd/organizer
 ```
 
-From GoLand:
+### Running the compiled binary
 
-1. Create or edit a **Run/Debug Configuration** for `main.go`.
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+export WORKING_DIR="/path/to/your/magazine/scans"
+export OUTPUT_DIR="/path/to/output/directory"
+
+./bin/organizer
+```
+
+### From GoLand
+
+1. Create or edit a **Run/Debug Configuration** for `cmd/organizer/main.go`.
 2. Set `OPENAI_API_KEY`, `WORKING_DIR`, and `OUTPUT_DIR` in **Environment variables**.
 3. Run the configuration.
 
@@ -103,8 +143,9 @@ The main goroutine uses a shared `sync.WaitGroup` to wait for all services to co
 
 ```
 organizer/
-├── main.go                          # Entry point, initializes and coordinates services
-├── go.mod                           # Module definition and dependencies
+├── cmd/
+│   └── organizer/
+│       └── main.go                  # Application entry point
 ├── internal/
 │   ├── abstractions/
 │   │   ├── entities/                # Domain entities (Magazine, MagazinePages, etc.)
@@ -115,6 +156,10 @@ organizer/
 │   ├── configuration/               # Configuration management
 │   ├── copier/                      # File organization and copying service
 │   └── scanner/                     # Directory scanning and page ordering service
+├── bin/                             # Compiled binaries (gitignored)
+├── Makefile                         # Build automation
+├── go.mod                           # Module definition and dependencies
+├── go.sum                           # Dependency checksums
 └── README.md
 ```
 
