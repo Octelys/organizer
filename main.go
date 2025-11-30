@@ -14,8 +14,12 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
-	//"github.com/openai/openai-go/v3/responses"
 )
+
+type Page struct {
+	File   string `json:"file"`
+	Number uint8  `json:"number"`
+}
 
 type Publication struct {
 	Title  string  `json:"title"`
@@ -24,7 +28,23 @@ type Publication struct {
 	Year   uint16  `json:"year"`
 }
 
+func monthNumbersToNames(nums []uint8) []string {
+	months := []string{
+		"Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+		"Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+	}
+
+	names := make([]string, 0, len(nums))
+	for _, n := range nums {
+		if n >= 1 && n <= 12 {
+			names = append(names, months[n-1])
+		}
+	}
+	return names
+}
+
 func main() {
+
 	ctx := context.Background()
 
 	openAiApiKey := os.Getenv("OPENAI_API_KEY")
@@ -88,7 +108,7 @@ func main() {
 		fmt.Printf("Requesting the assistant to guess the order of the files... ")
 
 		var assistantPrompt strings.Builder
-		assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [\"page_01.pdf\", \"page_02.pdf\"]). Return only valid JSON and no extra text.\n")
+		assistantPrompt.WriteString("Below are the files found in the directory. Based on the information found there, sort them according to their page number in a JSON array (for example: [{\"file\": \"page_01.pdf\", \"number\": 1 }, {\"file\": \"page_02.pdf\", \"number\": 2 }]). If the 1st file starts at the number 0, make sure you start counting at 1. Return only valid JSON and no extra text.\n")
 
 		for _, file := range files {
 			assistantPrompt.WriteString(file.Name())
@@ -120,15 +140,15 @@ func main() {
 			os.Exit(10004)
 		}
 
-		var orderedFiles []string
-		if err := json.Unmarshal([]byte(chatResp.Choices[0].Message.Content), &orderedFiles); err != nil {
+		var orderedPages []Page
+		if err := json.Unmarshal([]byte(chatResp.Choices[0].Message.Content), &orderedPages); err != nil {
 			fmt.Printf("[ FAILED ]\n")
 			fmt.Printf("\n")
 			fmt.Printf("\tUnable to parse assistant JSON response: %v\n", err)
 			os.Exit(10005)
 		}
 
-		if len(orderedFiles) == 0 {
+		if len(orderedPages) == 0 {
 			fmt.Printf("[ FAILED ]\n")
 			fmt.Printf("\n")
 			fmt.Printf("\tThe assistant did not return any ordered files\n")
@@ -140,7 +160,7 @@ func main() {
 		//	----------------------------------------------------------------------------------------------------------------
 		// 	3. Extract the publication month(s) & year of the first page, assuming it is the cover
 		//	----------------------------------------------------------------------------------------------------------------
-		coverFileName := orderedFiles[0]
+		coverFileName := orderedPages[0].File
 
 		fmt.Printf("Analyzing cover file '%s'... ", coverFileName)
 
@@ -224,5 +244,57 @@ func main() {
 		}
 
 		fmt.Printf("Publication %s #%d\n", publication.Title, publication.Number)
+
+		newPublicationFolder := filepath.Join(workingDir, fmt.Sprintf("__%s", publication.Title))
+
+		if _, err := os.Stat(newPublicationFolder); os.IsNotExist(err) {
+			err := os.Mkdir(newPublicationFolder, os.ModePerm)
+			if err != nil {
+				fmt.Printf("Unable to create folder %s: %v\n", newPublicationFolder, err)
+				os.Exit(10010)
+			}
+		}
+
+		knownMonths := monthNumbersToNames(publication.Month)
+		publicationMonths := strings.Join(knownMonths, " - ")
+		publicationDate := fmt.Sprintf("%s %d", publicationMonths, publication.Year)
+
+		newPublicationFolderNumber := filepath.Join(newPublicationFolder, fmt.Sprintf("Numéro %02d | %s", publication.Number, publicationDate))
+
+		if _, err := os.Stat(newPublicationFolderNumber); os.IsNotExist(err) {
+			err := os.Mkdir(newPublicationFolderNumber, os.ModePerm)
+			if err != nil {
+				fmt.Printf("Unable to create folder %s: %v\n", newPublicationFolderNumber, err)
+				os.Exit(10010)
+			}
+		}
+
+		for _, orderedPage := range orderedPages {
+			srcPath := filepath.Join(publicationFolder, orderedPage.File)
+
+			pageFileName := fmt.Sprintf("%03d%s", orderedPage.Number, strings.ToLower(filepath.Ext(orderedPage.File)))
+			dstPath := filepath.Join(newPublicationFolderNumber, pageFileName)
+
+			src, err := os.Open(srcPath)
+			if err != nil {
+				fmt.Printf("Unable to open source file %s: %v\n", srcPath, err)
+				os.Exit(10010)
+			}
+			defer src.Close()
+
+			dst, err := os.Create(dstPath)
+			if err != nil {
+				fmt.Printf("Unable to create destination file %s: %v\n", dstPath, err)
+				os.Exit(10010)
+			}
+			defer dst.Close()
+
+			if _, err := io.Copy(dst, src); err != nil {
+				fmt.Printf("Unable to copy the file from %s to %s: %v\n", srcPath, dstPath, err)
+				os.Exit(10010)
+			}
+
+			fmt.Printf("\tFile %s copied\n", dstPath)
+		}
 	}
 }
