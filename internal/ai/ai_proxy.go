@@ -33,7 +33,7 @@ func New(
 	return &AiProxy{
 		client:  &openaiClient,
 		context: context,
-		model:   openai.ChatModelGPT5Mini,
+		model:   openai.ChatModelGPT5Nano,
 	}, nil
 }
 

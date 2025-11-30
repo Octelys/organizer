@@ -69,7 +69,7 @@ func (c *CopierService) monitor() error {
 			return err
 		}
 
-		fmt.Printf("Magazine %s %s transferred\n", magazine.Metadata.Title, magazine.Metadata.Number)
+		fmt.Printf("Magazine %s %d transferred\n", magazine.Metadata.Title, magazine.Metadata.Number)
 	}
 
 	fmt.Println("Copier service stopped.")
