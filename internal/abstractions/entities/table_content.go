@@ -6,6 +6,6 @@ type TableContent struct {
 }
 
 type TableContentEntry struct {
-	Title       string
-	PageNumbers []uint8
+	Title       string  `json:"title"`
+	PageNumbers []uint8 `json:"pageNumbers"`
 }

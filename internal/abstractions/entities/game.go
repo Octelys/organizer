@@ -1,7 +1,8 @@
 package entities
 
 type Game struct {
-	Title string
-	Score int8
-	OutOf int8
+	Title   string `json:"title"`
+	Console string `json:"console"`
+	Score   int32  `json:"score"`
+	OutOf   int32  `json:"outOf"`
 }

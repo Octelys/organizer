@@ -10,13 +10,15 @@ import (
 	"organizer/internal/audit"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
 
 const (
 	CoverPageAssistantPrompt      = "You are given a JPG file containing an image of a cover scanner of a French publication. Based on typical naming conventions and any context you can infer, return only the title, publication number and publication month and year in the JSON format `{ \"title\": string, \"months\": [number,], \"year\": number, \"number\": number }`. If you cannot determine it, answer exactly `Unknown`. Do not add any extra explanation."
-	TableOfContentAssistantPrompt = "This page should be a Summary page of a french magazine. Give me each section name with the page numbers. Returns the structure in the following Json format: {\"error\": string, [{\"title\": string, \"numbers\": [number]}]. Order the result by the Numbers from the lower number to the highest"
+	TableOfContentAssistantPrompt = "This page should be a Summary page of a french magazine. Give me each section name with the page numbers. Returns the structure in the following Json format: {\"error\": string, \"entries\": [{\"title\": string, \"pageNumbers\": [number]}]. Order the result by the Numbers from the lower number to the highest. Only keep the entries that have the words 'Test(s)', 'Sélection(s)' (case insensitive)"
+	GameTestedAssistantPrompt     = "This page a test of a game. Found the name of the game and the console is on. If it is on the page, return the score given to the game. The result should be return in the following Json format: {\"title\": string, \"console\": string, \"score\": number, \"outOf\": number}."
 )
 
 type AnalyzerService struct {
@@ -171,6 +173,8 @@ func (a *AnalyzerService) analyzeTableOfContent(magazinePages entities.MagazineP
 		return
 	}
 
+	var tableContent entities.TableContent
+
 	for _, page := range magazinePages.Pages[1:] {
 
 		pageFile := filepath.Join(magazinePages.Folder, page.File)
@@ -213,7 +217,6 @@ func (a *AnalyzerService) analyzeTableOfContent(magazinePages entities.MagazineP
 			return
 		}
 
-		var tableContent entities.TableContent
 		if err := json.Unmarshal([]byte(response), &tableContent); err != nil {
 			a.auditService.Log(entities.Audit{
 				Severity:  entities.Error,
@@ -226,11 +229,77 @@ func (a *AnalyzerService) analyzeTableOfContent(magazinePages entities.MagazineP
 			continue
 		}
 
-		if tableContent.Error != "" {
+		if tableContent.Error != "" || len(tableContent.Entries) == 0 {
 			continue
+		} else {
+			break
 		}
+	}
 
-		//	TODO Analyzes the table
+	var gamesTested []entities.Game
+
+	for _, entry := range tableContent.Entries {
+		for _, pageNumber := range entry.PageNumbers {
+
+			idx := slices.IndexFunc(magazinePages.Pages, func(p entities.MagazinePage) bool {
+				return p.Number == pageNumber
+			})
+
+			pageFile := filepath.Join(magazinePages.Folder, magazinePages.Pages[idx].File)
+
+			if _, err := os.Stat(pageFile); err != nil {
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Error,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("File '%s' does not exist or is not accessible: %v", pageFile, err)})
+				return
+			}
+
+			reader, err := os.Open(pageFile)
+
+			if err != nil {
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Error,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("File '%s' does not exist or is not accessible: %v", pageFile, err)})
+				return
+			}
+
+			defer reader.Close()
+
+			response, err := a.aiProxy.SendRequestWithImage(GameTestedAssistantPrompt, reader)
+
+			if err != nil {
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Error,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("An error occurred trying to analyze the file '%s': %v", pageFile, err)})
+				return
+			}
+
+			if response == "" {
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Error,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("Unable to retrieve the game tested from the file '%s'", pageFile)})
+				return
+			}
+
+			var gameTested entities.Game
+			if err := json.Unmarshal([]byte(response), &gameTested); err != nil {
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Error,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("Unable to decode the table of content of file '%s': %v", pageFile, err)})
+				a.auditService.Log(entities.Audit{
+					Severity:  entities.Debug,
+					Timestamp: time.Now(),
+					Text:      fmt.Sprintf("Received: %s\n", response)})
+				continue
+			}
+
+			gamesTested = append(gamesTested, gameTested)
+		}
 	}
 }
 
